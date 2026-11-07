@@ -20,7 +20,7 @@ jobs:
           sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl \
             zlib1g-dev libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool \
             dpkg-dev liblz4-tool make optipng bc libssl-dev device-tree-compiler \
-            libncurses5-dev python2 python3 python-is-python3 cpio wget \
+            libncurses5-dev python2 python3 python-is-python3 cpio wget pkg-config libyaml-dev \
             binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi gcc-aarch64-linux-gnu
 
       - name: 3. Download Exact Toolchains (clang-r383902 + GCC 4.9)
@@ -51,11 +51,19 @@ jobs:
             sed -i 's/#define KERNEL_SU_VERSION .*/#define KERNEL_SU_VERSION 50000/g' KernelSU/kernel/ksu.h || true
           fi
 
-      - name: 5. Patch gta4lve_eur_open_defconfig & Fix Kconfig CRLF
+      - name: 5. Patch Defconfig & Fix DTC YAML / Kconfig Issues
         run: |
-          # تنظيف محارف Windows المخفية في ملفات Kconfig لمنع التحذيرات
+          # 1. تنظيف محارف Windows المخفية في ملفات Kconfig
           sed -i 's/\r$//' drivers/input/hx9031_sar/Kconfig || true
 
+          # 2. حل خطأ yamltree.c / libyaml النهائي في scripts/dtc/Makefile
+          if [ -f "scripts/dtc/Makefile" ]; then
+            sed -i 's/HOSTLDLIBS_dtc := -lyaml/HOSTLDLIBS_dtc := -lyaml/g' scripts/dtc/Makefile || true
+            # تعطيل فحص pkg-config yaml-0.1 لمنع خطأ undefined reference to yaml_*
+            sed -i 's/pkg-config --exists yaml-0.1/false/g' scripts/dtc/Makefile || true
+          fi
+
+          # 3. تلقيح الديف كونفيج الأساسي
           CFG="arch/arm64/configs/gta4lve_eur_open_defconfig"
           echo "CONFIG_KSU=y" >> "$CFG"
           echo "CONFIG_KPROBES=y" >> "$CFG"
@@ -84,14 +92,14 @@ jobs:
           mkdir -p $(pwd)/out
 
           # الخطوة الأولى: تجهيز الـ defconfig
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- gta4lve_eur_open_defconfig
+          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-deprecated-declarations" gta4lve_eur_open_defconfig
 
           # تأكيد تفعيل KSU و KPROBES داخل out/.config
           ./scripts/config --file $(pwd)/out/.config -e KSU -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS -e OVERLAY_FS
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-deprecated-declarations" olddefconfig
 
           # الخطوة الثانية: بناء الكيرنال بالكامل
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- -j$(nproc --all)
+          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-deprecated-declarations" -j$(nproc --all)
 
           cp out/arch/arm64/boot/Image $(pwd)/arch/arm64/boot/Image || true
 
