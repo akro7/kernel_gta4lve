@@ -74,7 +74,7 @@ jobs:
             lz4 openssl python3 device-tree-compiler pahole dialog bash sed wget git curl zip tar jq expect make \
             cmake automake autoconf binutils apt-utils perl gperf gawk bc zstd unzip cpio bison build-essential \
             ccache liblz4-tool libsdl1.2-dev libstdc++6 libxml2 libxml2-utils lzop pngcrush schedtool squashfs-tools \
-            xsltproc zlib1g-dev bzip2 libssl-dev dwarves libelf-dev dos2unix python-is-python3 git gh git-lfs nano
+            xsltproc zlib1g-dev bzip2 libssl-dev dwarves libelf-dev libyaml-dev dos2unix python-is-python3 git gh git-lfs nano
 
           sudo apt-get autoremove -y
 
@@ -85,6 +85,16 @@ jobs:
           git clone https://github.com/akro7/kernel_gta4lve.git
           cd kernel_gta4lve
           echo "Kernel repository cloned successfully."
+
+      - name: Fix host dtc libyaml linker flag
+        working-directory: kernel_gta4lve
+        shell: bash
+        run: |
+          set -euo pipefail
+          DTC_MAKEFILE="scripts/dtc/Makefile"
+          test -f "$DTC_MAKEFILE"
+          sed -i -E 's/^HOSTLDLIBS_dtc[[:space:]]*:=/HOSTLOADLIBES_dtc :=/' "$DTC_MAKEFILE"
+          grep -Fxq 'HOSTLOADLIBES_dtc := -lyaml' "$DTC_MAKEFILE"
 
       - name: Clone Toolchain Repository
         working-directory: kernel_gta4lve
