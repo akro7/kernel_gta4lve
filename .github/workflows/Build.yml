@@ -78,6 +78,17 @@ jobs:
 
           export GCC_PATH=$(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin
           export CLANG_TOOL_PATH=$(pwd)/toolchain/clang/host/linux-x86/clang-r383902/bin
+
+          # GCC 4.9 bundle omits some binutils; map the installed GNU AArch64 tools to Android's prefix.
+          for tool in ar nm objcopy objdump ranlib readelf size strip; do
+            system_tool="$(command -v "aarch64-linux-gnu-${tool}" || true)"
+            if [ -z "$system_tool" ]; then
+              echo "::error::Missing AArch64 binutils tool: ${tool}"
+              exit 1
+            fi
+            ln -sf "$system_tool" "${GCC_PATH}/aarch64-linux-android-${tool}"
+          done
+
           export PATH=${CLANG_TOOL_PATH}:${GCC_PATH}:${PATH}
 
           export CROSS_COMPILE=${GCC_PATH}/aarch64-linux-android-
