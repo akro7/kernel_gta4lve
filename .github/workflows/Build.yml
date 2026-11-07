@@ -13,6 +13,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          lfs: true
 
       - name: 2. Install Build Dependencies
         run: |
@@ -80,6 +81,9 @@ jobs:
           export CLANG_TOOL_PATH=$(pwd)/toolchain/clang/host/linux-x86/clang-r383902/bin
           export PATH=${CLANG_TOOL_PATH}:${GCC_PATH}:${PATH}
 
+          # Linux 4.14 appends '+' when LOCALVERSION is unset; keep the release exact.
+          export LOCALVERSION=
+
           export CROSS_COMPILE=${GCC_PATH}/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export ARCH=arm64
@@ -96,7 +100,17 @@ jobs:
 
           # تأكيد تفعيل KSU و KPROBES داخل out/.config
           ./scripts/config --file $(pwd)/out/.config -e KSU -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS -e OVERLAY_FS
+          # يجعل uname -r ونسخة النواة المعروضة تتضمن لاحقة Shadow.
+          ./scripts/config --file $(pwd)/out/.config --set-str LOCALVERSION "-Shadow"
+          ./scripts/config --file $(pwd)/out/.config -d LOCALVERSION_AUTO
           make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-deprecated-declarations" olddefconfig
+
+          KERNEL_RELEASE=$(make -s -C $(pwd) O=$(pwd)/out ARCH=arm64 kernelrelease)
+          echo "Kernel release: ${KERNEL_RELEASE}"
+          if [ "${KERNEL_RELEASE}" != "4.14.199-Shadow" ]; then
+            echo "::error::Expected kernel release 4.14.199-Shadow, got ${KERNEL_RELEASE}"
+            exit 1
+          fi
 
           # الخطوة الثانية: بناء الكيرنال بالكامل
           make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-deprecated-declarations" -j$(nproc --all)
@@ -106,7 +120,7 @@ jobs:
       - name: 7. Upload Compiled Shadow Kernel v5.0.0
         uses: actions/upload-artifact@v4
         with:
-          name: ShadowSU-v5.0.0-Kernel-gta4lve
+          name: Kernel-4.14.199-Shadow-gta4lve
           path: |
             out/arch/arm64/boot/Image*
             out/arch/arm64/boot/dts/**/*.dtb
