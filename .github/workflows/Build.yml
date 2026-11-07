@@ -1,127 +1,109 @@
-name: Auto Patch & Build Shadow Kernel v5.0.0 (gta4lve)
+name: Build SM-T509 Kernel
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
+
+permissions:
+  contents: read
 
 jobs:
-  build-shadow-kernel:
+  prepare:
+    name: Prepare Runner and Clone Repositories
     runs-on: ubuntu-22.04
+
     steps:
-      - name: 1. Checkout Kernel Source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          lfs: true
-
-      - name: 2. Install Build Dependencies
+      - name: Cleanup Runner
+        shell: bash
         run: |
+          set -euo pipefail
+
+          echo "======================================"
+          echo "       RUNNER CLEANUP"
+          echo "======================================"
+
+          echo "Disk usage before cleanup:"
+          df -h /
+
           sudo apt-get update
-          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl \
-            zlib1g-dev libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool \
-            dpkg-dev liblz4-tool make optipng bc libssl-dev device-tree-compiler \
-            libncurses5-dev python2 python3 python-is-python3 cpio wget pkg-config libyaml-dev \
-            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi gcc-aarch64-linux-gnu
 
-      - name: 3. Download Exact Toolchains (clang-r383902 + GCC 4.9)
+          mapfile -t PURGE_PKGS < <(
+            dpkg-query -W -f='${binary:Package}\\n' 2>/dev/null |
+            grep -E '^(azure-cli|google-cloud-cli|microsoft-edge-stable|google-chrome-stable|firefox|postgresql.*|temurin-.*|mysql.*|dotnet-sdk-.*)$' || true
+          )
+
+          if ((${#PURGE_PKGS[@]})); then
+            sudo apt-get purge -y "${PURGE_PKGS[@]}"
+          fi
+
+          sudo rm -rf \\
+            /usr/share/swift \\
+            /usr/share/miniconda \\
+            /usr/share/az* \\
+            /usr/local/lib/node_modules \\
+            /usr/local/share/chromium \\
+            /usr/local/share/powershell \\
+            /usr/local/julia \\
+            /usr/local/aws-cli \\
+            /usr/local/aws-sam-cli \\
+            /usr/share/gradle \\
+            /usr/local/lib/android \\
+            /usr/lib/android-sdk \\
+            /usr/share/dotnet \\
+            /usr/lib/dotnet \\
+            /opt/ghc \\
+            /usr/local/haskell \\
+            /opt/hostedtoolcache
+
+          sudo apt-get autoremove -y --purge
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          echo "Disk usage after cleanup:"
+          df -h /
+
+          echo "Cleanup completed."
+
+      - name: Install Required Packages
+        shell: bash
         run: |
-          mkdir -p $(pwd)/toolchain/clang/host/linux-x86/clang-r383902
-          mkdir -p $(pwd)/toolchain/gcc/linux-x86/aarch64
+          set -euo pipefail
 
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O clang.tar.gz
-          tar -xzf clang.tar.gz -C $(pwd)/toolchain/clang/host/linux-x86/clang-r383902
-          rm clang.tar.gz
+          sudo apt-get update
+          sudo apt-get install -y \\
+            flex libncurses-dev libncurses5-dev libncursesw5-dev fakeroot rsync kmod xz-utils \\
+            lz4 openssl python3 device-tree-compiler pahole dialog bash sed wget git curl zip tar jq expect make \\
+            cmake automake autoconf binutils apt-utils perl gperf gawk bc zstd unzip cpio bison build-essential \\
+            ccache liblz4-tool libsdl1.2-dev libstdc++6 libxml2 libxml2-utils lzop pngcrush schedtool squashfs-tools \\
+            xsltproc zlib1g-dev bzip2 libssl-dev dwarves libelf-dev dos2unix python-is-python3 git gh git-lfs nano
 
-          git clone --depth=1 --branch android11-release --single-branch https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 $(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
+          sudo apt-get autoremove -y
 
-      - name: 4. Auto-Integrate KernelSU & Sync with Shadow SU v5.0.0
+      - name: Clone Kernel Repository
+        shell: bash
         run: |
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          set -euo pipefail
+          git clone https://github.com/akro7/kernel_gta4lve.git
+          cd kernel_gta4lve
+          echo "Kernel repository cloned successfully."
 
-          if [ -f "KernelSU/kernel/apk_sign.c" ]; then
-            sed -i 's/EXPECTED_HASH.*/EXPECTED_HASH = "6c61873641866397c9913572f6f978b60644ff5ed5b0beb77a6f62d6e8734b7d";/g' KernelSU/kernel/apk_sign.c || true
-            sed -i '/bool is_manager_apk/,/^}/ s/return .*/return true;/' KernelSU/kernel/apk_sign.c || true
-            sed -i '/bool ksu_is_manager_apk/,/^}/ s/return .*/return true;/' KernelSU/kernel/apk_sign.c || true
-          fi
-
-          if [ -f "KernelSU/kernel/Makefile" ]; then
-            sed -i 's/-DKSU_VERSION=[^ ]*/-DKSU_VERSION=50000/g' KernelSU/kernel/Makefile || true
-          fi
-          if [ -f "KernelSU/kernel/ksu.h" ]; then
-            sed -i 's/#define KERNEL_SU_VERSION .*/#define KERNEL_SU_VERSION 50000/g' KernelSU/kernel/ksu.h || true
-          fi
-
-      - name: 5. Patch Defconfig & Fix DTC YAML / Kconfig Issues
+      - name: Clone Toolchain Repository
+        working-directory: kernel_gta4lve
+        shell: bash
         run: |
-          # 1. تنظيف محارف Windows المخفية في ملفات Kconfig
-          sed -i 's/\r$//' drivers/input/hx9031_sar/Kconfig || true
+          set -euo pipefail
+          git clone https://github.com/Mkolpo90/toolchain.git
+          echo "Toolchain repository cloned successfully."
 
-          # 2. حل خطأ yamltree.c / libyaml النهائي في scripts/dtc/Makefile
-          if [ -f "scripts/dtc/Makefile" ]; then
-            # هذا الإصدار يربط أدوات المضيف باستخدام HOSTLOADLIBES_<target>.
-            sed -i 's/^HOSTLDLIBS_dtc[[:space:]]*:=/HOSTLOADLIBES_dtc :=/' scripts/dtc/Makefile
-            grep -q '^HOSTLOADLIBES_dtc[[:space:]]*:= -lyaml$' scripts/dtc/Makefile
-          fi
-
-          # 3. تلقيح الديف كونفيج الأساسي
-          CFG="arch/arm64/configs/gta4lve_eur_open_defconfig"
-          echo "CONFIG_KSU=y" >> "$CFG"
-          echo "CONFIG_KPROBES=y" >> "$CFG"
-          echo "CONFIG_HAVE_KPROBES=y" >> "$CFG"
-          echo "CONFIG_KPROBE_EVENTS=y" >> "$CFG"
-          echo "CONFIG_OVERLAY_FS=y" >> "$CFG"
-
-      - name: 6. Compile Kernel (Using Official build_kernel.sh Flags)
+      - KernelSU
+        shell: bash
         run: |
-          chmod +x tools/mkdtimg/* || true
-          chmod +x scripts/* || true
-
-          export GCC_PATH=$(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin
-          export CLANG_TOOL_PATH=$(pwd)/toolchain/clang/host/linux-x86/clang-r383902/bin
-          export PATH=${CLANG_TOOL_PATH}:${GCC_PATH}:${PATH}
-
-          # Linux 4.14 appends '+' when LOCALVERSION is unset; keep the release exact.
-          export LOCALVERSION=
-
-          export CROSS_COMPILE=${GCC_PATH}/aarch64-linux-android-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export ARCH=arm64
-
-          export BSP_BUILD_FAMILY=qogirl6
-          export DTC_OVERLAY_TEST_EXT=$(pwd)/tools/mkdtimg/ufdt_apply_overlay
-          export DTC_OVERLAY_VTS_EXT=$(pwd)/tools/mkdtimg/ufdt_verify_overlay_host
-          export BSP_BUILD_ANDROID_OS=y
-
-          mkdir -p $(pwd)/out
-
-          # الخطوة الأولى: تجهيز الـ defconfig
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-deprecated-declarations" gta4lve_eur_open_defconfig
-
-          # تأكيد تفعيل KSU و KPROBES داخل out/.config
-          ./scripts/config --file $(pwd)/out/.config -e KSU -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS -e OVERLAY_FS
-          # يجعل uname -r ونسخة النواة المعروضة تتضمن لاحقة Shadow.
-          ./scripts/config --file $(pwd)/out/.config --set-str LOCALVERSION "-Shadow"
-          ./scripts/config --file $(pwd)/out/.config -d LOCALVERSION_AUTO
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-deprecated-declarations" olddefconfig
-
-          KERNEL_RELEASE=$(make -s -C $(pwd) O=$(pwd)/out ARCH=arm64 kernelrelease)
-          echo "Kernel release: ${KERNEL_RELEASE}"
-          if [ "${KERNEL_RELEASE}" != "4.14.199-Shadow" ]; then
-            echo "::error::Expected kernel release 4.14.199-Shadow, got ${KERNEL_RELEASE}"
-            exit 1
-          fi
-
-          # الخطوة الثانية: بناء الكيرنال بالكامل
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-deprecated-declarations" -j$(nproc --all)
-
-          cp out/arch/arm64/boot/Image $(pwd)/arch/arm64/boot/Image || true
-
-      - name: 7. Upload Compiled Shadow Kernel v5.0.0
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel-4.14.199-Shadow-gta4lve
-          path: |
-            out/arch/arm64/boot/Image*
-            out/arch/arm64/boot/dts/**/*.dtb
-            out/arch/arm64/boot/dtbo.img
+          set -euo pipefail
+          curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/refs/heads/master/kernel/setup.sh" | bash
+          echo CONFIG_KSU=y >> arch/arm64/configs/gta4lve_eur_open_defconfig
+          echo CONFIG_KSU_TAMPER_SYSCALL_TABLE=y >> arch/arm64/configs/gta4lve_eur_open_defconfig
+          
+      - Building
+        shell: bash
+        run: |
+        set -euo pipefail
+        bash build_kernel.sh
