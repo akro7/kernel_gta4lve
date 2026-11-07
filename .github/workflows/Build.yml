@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
 
           mapfile -t PURGE_PKGS < <(
-            dpkg-query -W -f='${binary:Package}\\n' 2>/dev/null |
+            dpkg-query -W -f='${binary:Package}\n' 2>/dev/null |
             grep -E '^(azure-cli|google-cloud-cli|microsoft-edge-stable|google-chrome-stable|firefox|postgresql.*|temurin-.*|mysql.*|dotnet-sdk-.*)$' || true
           )
 
@@ -35,23 +35,23 @@ jobs:
             sudo apt-get purge -y "${PURGE_PKGS[@]}"
           fi
 
-          sudo rm -rf \\
-            /usr/share/swift \\
-            /usr/share/miniconda \\
-            /usr/share/az* \\
-            /usr/local/lib/node_modules \\
-            /usr/local/share/chromium \\
-            /usr/local/share/powershell \\
-            /usr/local/julia \\
-            /usr/local/aws-cli \\
-            /usr/local/aws-sam-cli \\
-            /usr/share/gradle \\
-            /usr/local/lib/android \\
-            /usr/lib/android-sdk \\
-            /usr/share/dotnet \\
-            /usr/lib/dotnet \\
-            /opt/ghc \\
-            /usr/local/haskell \\
+          sudo rm -rf \
+            /usr/share/swift \
+            /usr/share/miniconda \
+            /usr/share/az* \
+            /usr/local/lib/node_modules \
+            /usr/local/share/chromium \
+            /usr/local/share/powershell \
+            /usr/local/julia \
+            /usr/local/aws-cli \
+            /usr/local/aws-sam-cli \
+            /usr/share/gradle \
+            /usr/local/lib/android \
+            /usr/lib/android-sdk \
+            /usr/share/dotnet \
+            /usr/lib/dotnet \
+            /opt/ghc \
+            /usr/local/haskell \
             /opt/hostedtoolcache
 
           sudo apt-get autoremove -y --purge
@@ -69,11 +69,11 @@ jobs:
           set -euo pipefail
 
           sudo apt-get update
-          sudo apt-get install -y \\
-            flex libncurses-dev libncurses5-dev libncursesw5-dev fakeroot rsync kmod xz-utils \\
-            lz4 openssl python3 device-tree-compiler pahole dialog bash sed wget git curl zip tar jq expect make \\
-            cmake automake autoconf binutils apt-utils perl gperf gawk bc zstd unzip cpio bison build-essential \\
-            ccache liblz4-tool libsdl1.2-dev libstdc++6 libxml2 libxml2-utils lzop pngcrush schedtool squashfs-tools \\
+          sudo apt-get install -y \
+            flex libncurses-dev libncurses5-dev libncursesw5-dev fakeroot rsync kmod xz-utils \
+            lz4 openssl python3 device-tree-compiler pahole dialog bash sed wget git curl zip tar jq expect make \
+            cmake automake autoconf binutils apt-utils perl gperf gawk bc zstd unzip cpio bison build-essential \
+            ccache liblz4-tool libsdl1.2-dev libstdc++6 libxml2 libxml2-utils lzop pngcrush schedtool squashfs-tools \
             xsltproc zlib1g-dev bzip2 libssl-dev dwarves libelf-dev dos2unix python-is-python3 git gh git-lfs nano
 
           sudo apt-get autoremove -y
