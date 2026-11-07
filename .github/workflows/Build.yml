@@ -18,10 +18,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl \
-            zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev \
-            squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng bc libssl-dev \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler libncurses5-dev \
-            python2 python3 python-is-python3
+            zlib1g-dev libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool \
+            dpkg-dev liblz4-tool make optipng bc libssl-dev device-tree-compiler \
+            libncurses5-dev python2 python3 python-is-python3 cpio
 
       - name: 3. Download Toolchain (Clang + GCC 4.9)
         run: |
