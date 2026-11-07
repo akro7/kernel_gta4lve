@@ -32,7 +32,7 @@ jobs:
           tar -xzf clang.tar.gz -C $(pwd)/toolchain/clang/host/linux-x86/clang-r383902
           rm clang.tar.gz
 
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 $(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
+          git clone --depth=1 --branch android11-release --single-branch https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 $(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
 
       - name: 4. Auto-Integrate KernelSU & Sync with Shadow SU v5.0.0
         run: |
@@ -78,17 +78,6 @@ jobs:
 
           export GCC_PATH=$(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin
           export CLANG_TOOL_PATH=$(pwd)/toolchain/clang/host/linux-x86/clang-r383902/bin
-
-          # GCC 4.9 bundle omits some binutils; map the installed GNU AArch64 tools to Android's prefix.
-          for tool in ar nm objcopy objdump ranlib readelf size strip; do
-            system_tool="$(command -v "aarch64-linux-gnu-${tool}" || true)"
-            if [ -z "$system_tool" ]; then
-              echo "::error::Missing AArch64 binutils tool: ${tool}"
-              exit 1
-            fi
-            ln -sf "$system_tool" "${GCC_PATH}/aarch64-linux-android-${tool}"
-          done
-
           export PATH=${CLANG_TOOL_PATH}:${GCC_PATH}:${PATH}
 
           export CROSS_COMPILE=${GCC_PATH}/aarch64-linux-android-
