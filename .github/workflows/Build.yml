@@ -58,9 +58,9 @@ jobs:
 
           # 2. حل خطأ yamltree.c / libyaml النهائي في scripts/dtc/Makefile
           if [ -f "scripts/dtc/Makefile" ]; then
-            sed -i 's/HOSTLDLIBS_dtc := -lyaml/HOSTLDLIBS_dtc := -lyaml/g' scripts/dtc/Makefile || true
-            # تعطيل فحص pkg-config yaml-0.1 لمنع خطأ undefined reference to yaml_*
-            sed -i 's/pkg-config --exists yaml-0.1/false/g' scripts/dtc/Makefile || true
+            # هذا الإصدار يربط أدوات المضيف باستخدام HOSTLOADLIBES_<target>.
+            sed -i 's/^HOSTLDLIBS_dtc[[:space:]]*:=/HOSTLOADLIBES_dtc :=/' scripts/dtc/Makefile
+            grep -q '^HOSTLOADLIBES_dtc[[:space:]]*:= -lyaml$' scripts/dtc/Makefile
           fi
 
           # 3. تلقيح الديف كونفيج الأساسي
