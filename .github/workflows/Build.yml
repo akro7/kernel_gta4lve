@@ -20,35 +20,30 @@ jobs:
           sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl \
             zlib1g-dev libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool \
             dpkg-dev liblz4-tool make optipng bc libssl-dev device-tree-compiler \
-            libncurses5-dev python2 python3 python-is-python3 cpio wget
+            libncurses5-dev python2 python3 python-is-python3 cpio wget \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi gcc-aarch64-linux-gnu
 
       - name: 3. Download Exact Toolchains (clang-r383902 + GCC 4.9)
         run: |
-          # إنشاء نفس المسارات الموجودة في build_kernel.sh بالضبط
           mkdir -p $(pwd)/toolchain/clang/host/linux-x86/clang-r383902
           mkdir -p $(pwd)/toolchain/gcc/linux-x86/aarch64
 
-          # تحميل clang-r383902 الرسمي مباشرة من Google
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz -O clang.tar.gz
           tar -xzf clang.tar.gz -C $(pwd)/toolchain/clang/host/linux-x86/clang-r383902
           rm clang.tar.gz
 
-          # تحميل GCC 4.9 الرسمي مباشرة من Google
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 $(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
 
       - name: 4. Auto-Integrate KernelSU & Sync with Shadow SU v5.0.0
         run: |
-          # سحب فرع الكيرنال المتوافق مع نواة 4.14
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
-          # حقن بصمة شهادة Shadow SU v5.0.0 وتفعيل قبول المدير مباشرة
           if [ -f "KernelSU/kernel/apk_sign.c" ]; then
             sed -i 's/EXPECTED_HASH.*/EXPECTED_HASH = "6c61873641866397c9913572f6f978b60644ff5ed5b0beb77a6f62d6e8734b7d";/g' KernelSU/kernel/apk_sign.c || true
             sed -i '/bool is_manager_apk/,/^}/ s/return .*/return true;/' KernelSU/kernel/apk_sign.c || true
             sed -i '/bool ksu_is_manager_apk/,/^}/ s/return .*/return true;/' KernelSU/kernel/apk_sign.c || true
           fi
 
-          # رفع إصدار الكيرنال الداخلي ليطابق إصدار التطبيق v5.0.0 (50000)
           if [ -f "KernelSU/kernel/Makefile" ]; then
             sed -i 's/-DKSU_VERSION=[^ ]*/-DKSU_VERSION=50000/g' KernelSU/kernel/Makefile || true
           fi
@@ -56,8 +51,11 @@ jobs:
             sed -i 's/#define KERNEL_SU_VERSION .*/#define KERNEL_SU_VERSION 50000/g' KernelSU/kernel/ksu.h || true
           fi
 
-      - name: 5. Patch gta4lve_eur_open_defconfig
+      - name: 5. Patch gta4lve_eur_open_defconfig & Fix Kconfig CRLF
         run: |
+          # تنظيف محارف Windows المخفية في ملفات Kconfig لمنع التحذيرات
+          sed -i 's/\r$//' drivers/input/hx9031_sar/Kconfig || true
+
           CFG="arch/arm64/configs/gta4lve_eur_open_defconfig"
           echo "CONFIG_KSU=y" >> "$CFG"
           echo "CONFIG_KPROBES=y" >> "$CFG"
@@ -67,14 +65,16 @@ jobs:
 
       - name: 6. Compile Kernel (Using Official build_kernel.sh Flags)
         run: |
-          # إعطاء صلاحيات التنفيذ لأدوات الـ Overlay المرفقة في السورس
           chmod +x tools/mkdtimg/* || true
           chmod +x scripts/* || true
 
-          export CROSS_COMPILE=$(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-
+          export GCC_PATH=$(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin
+          export CLANG_TOOL_PATH=$(pwd)/toolchain/clang/host/linux-x86/clang-r383902/bin
+          export PATH=${CLANG_TOOL_PATH}:${GCC_PATH}:${PATH}
+
+          export CROSS_COMPILE=${GCC_PATH}/aarch64-linux-android-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
           export ARCH=arm64
-          export CLANG_TOOL_PATH=$(pwd)/toolchain/clang/host/linux-x86/clang-r383902/bin/
-          export PATH=${CLANG_TOOL_PATH}:${PATH}
 
           export BSP_BUILD_FAMILY=qogirl6
           export DTC_OVERLAY_TEST_EXT=$(pwd)/tools/mkdtimg/ufdt_apply_overlay
@@ -84,14 +84,14 @@ jobs:
           mkdir -p $(pwd)/out
 
           # الخطوة الأولى: تجهيز الـ defconfig
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- gta4lve_eur_open_defconfig
+          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- gta4lve_eur_open_defconfig
 
           # تأكيد تفعيل KSU و KPROBES داخل out/.config
           ./scripts/config --file $(pwd)/out/.config -e KSU -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS -e OVERLAY_FS
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
 
           # الخطوة الثانية: بناء الكيرنال بالكامل
-          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- -j$(nproc --all)
+          make -C $(pwd) O=$(pwd)/out BSP_BUILD_DT_OVERLAY=y CC=clang LD=ld.lld ARCH=arm64 CROSS_COMPILE=${CROSS_COMPILE} CLANG_TRIPLE=aarch64-linux-gnu- -j$(nproc --all)
 
           cp out/arch/arm64/boot/Image $(pwd)/arch/arm64/boot/Image || true
 
