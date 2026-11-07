@@ -1,0 +1,94 @@
+name: Auto Patch & Build Shadow Kernel v5.0.0 (gta4lve)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-shadow-kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 1. Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 2. Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl \
+            zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev \
+            squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng bc libssl-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler libncurses5-dev \
+            python2 python3 python-is-python3
+
+      - name: 3. Download Toolchain (Clang + GCC 4.9)
+        run: |
+          mkdir -p $(pwd)/toolchains
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r383902.git $(pwd)/toolchains/clang
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git $(pwd)/toolchains/gcc64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git $(pwd)/toolchains/gcc32
+
+      - name: 4. Auto-Integrate KernelSU & Sync with Shadow SU v5.0.0
+        run: |
+          # سحب فرع الكيرنال المتوافق مع نواة 4.14
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+
+          # حقن بصمة شهادة Shadow SU v5.0.0 وتفعيل قبول المدير مباشرة
+          if [ -f "KernelSU/kernel/apk_sign.c" ]; then
+            sed -i 's/EXPECTED_HASH.*/EXPECTED_HASH = "6c61873641866397c9913572f6f978b60644ff5ed5b0beb77a6f62d6e8734b7d";/g' KernelSU/kernel/apk_sign.c || true
+            sed -i '/bool is_manager_apk/,/^}/ s/return .*/return true;/' KernelSU/kernel/apk_sign.c || true
+            sed -i '/bool ksu_is_manager_apk/,/^}/ s/return .*/return true;/' KernelSU/kernel/apk_sign.c || true
+          fi
+
+          # رفع إصدار الكيرنال الداخلي ليطابق إصدار التطبيق v5.0.0 (50000)
+          if [ -f "KernelSU/kernel/Makefile" ]; then
+            sed -i 's/-DKSU_VERSION=[^ ]*/-DKSU_VERSION=50000/g' KernelSU/kernel/Makefile || true
+          fi
+          if [ -f "KernelSU/kernel/ksu.h" ]; then
+            sed -i 's/#define KERNEL_SU_VERSION .*/#define KERNEL_SU_VERSION 50000/g' KernelSU/kernel/ksu.h || true
+          fi
+
+      - name: 5. Patch gta4lve_eur_open_defconfig
+        run: |
+          CFG="arch/arm64/configs/gta4lve_eur_open_defconfig"
+          echo "CONFIG_KSU=y" >> "$CFG"
+          echo "CONFIG_KPROBES=y" >> "$CFG"
+          echo "CONFIG_HAVE_KPROBES=y" >> "$CFG"
+          echo "CONFIG_KPROBE_EVENTS=y" >> "$CFG"
+          echo "CONFIG_OVERLAY_FS=y" >> "$CFG"
+
+      - name: 6. Compile Kernel
+        run: |
+          export PATH="$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/gcc64/bin:$(pwd)/toolchains/gcc32/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CC=clang
+
+          mkdir -p out
+          make O=out ARCH=arm64 gta4lve_eur_open_defconfig
+          
+          # تأكيد تفعيل الخيارات في ملف .config النهائي
+          ./scripts/config --file out/.config -e KSU -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS -e OVERLAY_FS
+          make O=out ARCH=arm64 olddefconfig
+
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+
+      - name: 7. Upload Compiled Shadow Kernel v5.0.0
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShadowSU-v5.0.0-Kernel-gta4lve
+          path: |
+            out/arch/arm64/boot/Image*
+            out/arch/arm64/boot/dts/**/*.dtb
+            out/arch/arm64/boot/dtbo.img
