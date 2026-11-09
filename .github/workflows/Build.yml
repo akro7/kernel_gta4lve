@@ -104,23 +104,24 @@ jobs:
           git clone https://github.com/Mkolpo90/toolchain.git
           echo "Toolchain repository cloned successfully."
 
-      - name: Apply KernelSU and ShadowSU Manager signature patch
+      - name: Apply BakaSU v4.2.0-rc3 hooks and ShadowSU manager config
         working-directory: kernel_gta4lve
         shell: bash
         run: |
           set -euo pipefail
-          curl -fLSs "https://raw.githubusercontent.com/backslashxx/KernelSU/refs/heads/master/kernel/setup.sh" | bash
+          curl -fLSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/v4.2.0-rc3/kernel/setup.sh" | bash -s -- v4.2.0-rc3
+          test -L drivers/kernelsu
+          test "$(git -C KernelSU describe --exact-match --tags)" = "v4.2.0-rc3"
 
-          KSU_MAKEFILE="KernelSU/kernel/Makefile"
-          test -f "$KSU_MAKEFILE"
-          sed -i -E 's/^KSU_EXPECTED_SIZE[[:space:]]*:=.*/KSU_EXPECTED_SIZE := 0x0354/' "$KSU_MAKEFILE"
-          sed -i -E 's/^KSU_EXPECTED_HASH[[:space:]]*:=.*/KSU_EXPECTED_HASH := 2468c90116adfac52c254cc235c8e10e27e6873e4c87c5eef1423737701b426c/' "$KSU_MAKEFILE"
-          grep -Fxq 'KSU_EXPECTED_SIZE := 0x0354' "$KSU_MAKEFILE"
-          grep -Fxq 'KSU_EXPECTED_HASH := 2468c90116adfac52c254cc235c8e10e27e6873e4c87c5eef1423737701b426c' "$KSU_MAKEFILE"
+          python3 .github/scripts/apply_bakasu_4_14.py
 
           DEFCONFIG="arch/arm64/configs/gta4lve_eur_open_defconfig"
-          grep -qxF 'CONFIG_KSU=y' "$DEFCONFIG" || echo 'CONFIG_KSU=y' >> "$DEFCONFIG"
-          grep -qxF 'CONFIG_KSU_TAMPER_SYSCALL_TABLE=y' "$DEFCONFIG" || echo 'CONFIG_KSU_TAMPER_SYSCALL_TABLE=y' >> "$DEFCONFIG"
+          for symbol in CONFIG_KSU CONFIG_KSU_MANUAL_HOOK CONFIG_KSU_MULTI_MANAGER_SUPPORT CONFIG_KSU_TOOLKIT_SUPPORT CONFIG_DEVTMPFS CONFIG_PID_NS CONFIG_USER_NS CONFIG_KALLSYMS_ALL CONFIG_ZRAM CONFIG_CRYPTO_LZ4 CONFIG_LZ4_COMPRESS CONFIG_IP6_NF_NAT; do
+            grep -qxF "${symbol}=y" "$DEFCONFIG" || { echo "::error::Missing ${symbol}=y"; exit 1; }
+          done
+          for symbol in CONFIG_KSU_TRACEPOINT_HOOK CONFIG_KSU_SUSFS; do
+            grep -qxF "# ${symbol} is not set" "$DEFCONFIG" || { echo "::error::Expected ${symbol} disabled"; exit 1; }
+          done
 
       - name: Build Shadow-4.14.199 kernel
         working-directory: kernel_gta4lve
@@ -136,7 +137,17 @@ jobs:
           make_prefix = "make -C $(pwd) O=$(pwd)/out "
           if text.count(make_prefix) != 2:
               raise SystemExit("Unexpected build_kernel.sh make command layout")
-          build.write_text(text.replace(make_prefix, make_prefix + "KERNELVERSION=Shadow-4.14.199 "))
+          make_args = (
+              "KERNELVERSION=Shadow-4.14.199 "
+              "KSU_EXPECTED_SIZE=0x0354 "
+              "KSU_EXPECTED_HASH=2468c90116adfac52c254cc235c8e10e27e6873e4c87c5eef1423737701b426c "
+              "KSU_MANAGER_PACKAGE=me.weishu.kernelsu "
+          )
+          updated = text.replace(make_prefix, make_prefix + make_args)
+          for argument in ("KERNELVERSION=Shadow-4.14.199", "KSU_EXPECTED_SIZE=0x0354", "KSU_EXPECTED_HASH=2468c90116adfac52c254cc235c8e10e27e6873e4c87c5eef1423737701b426c", "KSU_MANAGER_PACKAGE=me.weishu.kernelsu"):
+              if updated.count(argument) != 2:
+                  raise SystemExit(f"Expected two make arguments for {argument}")
+          build.write_text(updated)
           PY
 
           bash -euo pipefail build_kernel.sh
